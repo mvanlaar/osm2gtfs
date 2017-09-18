@@ -37,7 +37,7 @@ class Route(BaseRoute):
         if self.stops is not None:
             rep += " | Stops: " + str(len(self.stops)) + " | "
         rep += "https://www.openstreetmap.org/relation/" + str(self.id) + " "
-        rep += "http://www.consorciofenix.com.br/horarios?q=" + str(self.ref)
+        # rep += "http://www.consorciofenix.com.br/horarios?q=" + str(self.ref)
         return rep
 
     def set_duration(self, duration):
