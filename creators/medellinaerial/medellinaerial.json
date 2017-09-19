@@ -1,0 +1,33 @@
+{
+    "query": {
+        "bbox": {
+            "n": "6.3514686425",
+            "s": "6.1439683008",
+            "e": "-75.4867172241",
+            "w": "-75.6477355957"
+        },
+        "tags": {
+            "route": "aerialway"
+        }
+    },
+    "stops": {
+        "name_without": "Stop without name",
+        "name_auto": "no"
+    },
+    "agency": {
+        "agency_id": "MM-AERIALWAY",
+        "agency_name": "MetroMedellin",
+        "agency_url": "https://www.metrodemedellin.gov.co/",
+        "agency_timezone": "America/Bogota",
+        "agency_lang": "ES",
+        "agency_phone": "+57 (4) 4548888",
+        "agency_fare_url": ""
+    },
+    "feed_info": {
+        "publisher_name": "Torsten Grote",
+        "publisher_url": "https://transportr.grobox.de",
+        "version":  "0.1"
+    },
+    "output_file": "data/co-metromedellin-aerial.zip",
+    "selector": "medellinaerial"
+}
