@@ -15,12 +15,12 @@
         "name_auto": "no"
     },
     "agency": {
-        "agency_id": "MM-BUS",
+        "agency_id": "MM-METRO",
         "agency_name": "MetroMedellin",
         "agency_url": "https://www.metrodemedellin.gov.co/",
         "agency_timezone": "America/Bogota",
         "agency_lang": "ES",
-        "agency_phone": "+57 (4) 4548888 ",
+        "agency_phone": "+57 (4) 4548888",
         "agency_fare_url": ""
     },
     "feed_info": {

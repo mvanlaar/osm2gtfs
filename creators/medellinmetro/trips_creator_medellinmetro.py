@@ -2,228 +2,73 @@
 
 import sys
 import json
-import transitfeed
-from datetime import datetime
+import re
+from datetime import timedelta, datetime
 from creators.trips_creator import TripsCreator
 from core.osm_routes import Route, RouteMaster
 
 
+
 class TripsCreatorMedellinmetro(TripsCreator):
-        
-    def __init__(self, config):
-        super(TripsCreatorMedellinmetro, self).__init__(config)
 
-        self.start_date = datetime.strptime(self.config['feed_info']['start_date'], "%Y%m%d")
-
-        self.service_weekday = transitfeed.ServicePeriod("weekday")
+    def add_trips_to_schedule(self, schedule, data):
+        self.service_weekday = schedule.GetDefaultServicePeriod()
         self.service_weekday.SetStartDate(self.config['feed_info']['start_date'])
         self.service_weekday.SetEndDate(self.config['feed_info']['end_date'])
         self.service_weekday.SetWeekdayService(True)
-        self.service_weekday.SetWeekendService(False)
+        self.service_weekday.SetWeekendService(True)
 
-        self.service_saturday = transitfeed.ServicePeriod("saturday")
-        self.service_saturday.SetStartDate(self.config['feed_info']['start_date'])
-        self.service_saturday.SetEndDate(self.config['feed_info']['end_date'])
-        self.service_saturday.SetWeekdayService(False)
-        self.service_saturday.SetWeekendService(False)
-        self.service_saturday.SetDayOfWeekHasService(5, True)
-
-        self.service_sunday = transitfeed.ServicePeriod("sunday")
-        self.service_sunday.SetStartDate(self.config['feed_info']['start_date'])
-        self.service_sunday.SetEndDate(self.config['feed_info']['end_date'])
-        self.service_sunday.SetWeekdayService(False)
-        self.service_sunday.SetWeekendService(False)
-        self.service_sunday.SetDayOfWeekHasService(6, True)
-
-        self.exceptions = None
-
-    def add_trips_to_schedule(self, schedule, data):
         lines = data.routes
+        for route_ref, line in sorted(lines.iteritems()):
+            if type(line).__name__ != "RouteMaster":
+                continue
+            line_gtfs = schedule.AddRoute(
+                short_name=line.ref,
+                long_name=line.name.decode('utf8'),
+                route_type="Bus",
+                route_id=line.id)
+            line_gtfs.agency_id = schedule.GetDefaultAgency().agency_id
+            line_gtfs.route_desc = ""
+            line_gtfs.route_color = "1779c2"
+            line_gtfs.route_text_color = "ffffff"
 
-        # line (osm rounte master | gtfs route)
-        for line_id, line in lines.iteritems():
-            # debug
-            # print("DEBUG. procesando la línea:", line.name)
+            route_index = 0
+            for a_route_ref, a_route in line.routes.iteritems():
+                trip_gtfs = line_gtfs.AddTrip(schedule)
+                trip_gtfs.shape_id = TripsCreator.add_shape(schedule, a_route_ref, a_route)
+                trip_gtfs.trip_headsign = a_route.to
+                trip_gtfs.direction_id = route_index % 2
+                route_index += 1
+                try:
+                    ROUTE_FREQUENCY = int(line.frequency)
+                except Exception as e:
+                    print("frequency not a number for route_master " + str(line.id))
+                    ROUTE_FREQUENCY = 30
+                trip_gtfs.AddFrequency("05:00:00", "22:00:00", ROUTE_FREQUENCY * 60)
 
-            # itinerary (osm route | non existent gtfs element)
-            for itinerary_id, itinerary in line.routes.iteritems():
-                # debug
-                # print("DEBUG. procesando el itinerario", itinerary.name)
+                try:
+                    TRAVEL_TIME = int(a_route.travel_time)
+                except Exception as e:
+                    print("travel_time not a number for route " + str(a_route.id))
+                    TRAVEL_TIME = 120
 
-                # shape for itinerary
-                shape_id = _add_shape(schedule, itinerary_id, itinerary)
+                for index_stop, a_stop in enumerate(a_route.stops) :
+                    stop_id = a_stop.id
+                    departure_time = datetime(2008, 11, 22, 6, 0, 0)
 
-                # service periods | días de opearación (c/u con sus horarios)
-                #operations = self._get_itinerary_operation(itinerary)
+                    if index_stop == 0 :
+                        trip_gtfs.AddStopTime(schedule.GetStop(str(stop_id)), stop_time=departure_time.strftime("%H:%M:%S"))
+                    elif index_stop == len(a_route.stops) -1 :
+                        departure_time += timedelta(minutes = TRAVEL_TIME)
+                        trip_gtfs.AddStopTime(schedule.GetStop(str(stop_id)), stop_time=departure_time.strftime("%H:%M:%S"))
+                    else :
+                        trip_gtfs.AddStopTime(schedule.GetStop(str(stop_id)))
 
-                # operation (gtfs service period)
-                #for operation in operations:
-                #    service_period = self._create_service_period(
-                #        schedule, operation)
+                for secs, stop_time, is_timepoint in trip_gtfs.GetTimeInterpolatedStops():
+                    if not is_timepoint:
+                        stop_time.arrival_secs = secs
+                        stop_time.departure_secs = secs
+                        trip_gtfs.ReplaceStopTimeObject(stop_time)
 
-                #    horarios = load_times(itinerary, operation)
-                #    estaciones = load_stations(itinerary, operation)
+                TripsCreator.interpolate_stop_times(trip_gtfs)
 
-                #    route = schedule.GetRoute(line_id)
-
-                #    add_trips_for_route(schedule, route, itinerary,
-                #                       service_period, shape_id, estaciones,
-                #                        horarios)
-        return
-
-
-    def _get_itinerary_operation(self, itinerary,
-                                 filename='data/input_Medellin.json'):
-        """
-            Retorna un iterable (lista) de objetos str, cada uno un 'keyword'
-            del día o días de servicio, cuyos viajes (estaciones y horarios) se
-            incluyen en el archivo de entrada.
-        """
-
-        input_file = open(filename)
-        data = json.load(input_file)
-
-        fr = itinerary.fr.encode('utf-8')
-        to = itinerary.to.encode('utf-8')
-        start_date = self.config['feed_info']['start_date']
-        enda_date = self.config['feed_info']['end_date']
-
-        operations = []
-
-        for operation in data["itinerario"][itinerary.ref]:
-            input_fr = operation["from"].encode('utf-8')
-            input_to = operation["to"].encode('utf-8')
-            if input_fr == fr and input_to == to:
-
-                if operation["operacion"].encode('utf-8') == "weekday":
-                    operations.append("weekday")
-
-                if operation["operacion"].encode('utf-8') == "saturday":
-                    operations.append("saturday")
-
-                if operation["operacion"].encode('utf-8') == "sunday":
-                    operations.append("sunday")
-        return operations
-
-    def _create_service_period(self, schedule, operation):
-        try:
-            service = schedule.GetServicePeriod(operation)
-            if service is not None:
-                return service
-        except KeyError:
-            print("INFO. No existe el service_period para la operación:",
-                  operation, " por lo que será creado")
-
-        if operation == "weekday":
-            service = transitfeed.ServicePeriod("weekday")
-            service.SetWeekdayService(True)
-            service.SetWeekendService(False)
-        elif operation == "saturday":
-            service = transitfeed.ServicePeriod("saturday")
-            service.SetWeekdayService(False)
-            service.SetWeekendService(False)
-            service.SetDayOfWeekHasService(5, True)
-        elif operation == "sunday":
-            service = transitfeed.ServicePeriod("sunday")
-            service.SetWeekdayService(False)
-            service.SetWeekendService(False)
-            service.SetDayOfWeekHasService(6, True)
-        else:
-            raise KeyError("uknown operation keyword")
-
-        service.SetStartDate(self.config['feed_info']['start_date'])
-        service.SetEndDate(self.config['feed_info']['end_date'])
-        schedule.AddServicePeriodObject(service)
-        return schedule.GetServicePeriod(operation)
-
-
-def _add_shape(schedule, route_id, osm_r):
-    # get shape id
-    shape_id = str(route_id)
-    try:
-        schedule.GetShape(shape_id)
-    except KeyError:
-        shape = transitfeed.Shape(shape_id)
-        for point in osm_r.shape:
-            shape.AddPoint(lat=float(point["lat"]), lon=float(point["lon"]))
-        schedule.AddShapeObject(shape)
-
-    return shape_id
-
-
-def add_trips_for_route(schedule, gtfs_route, itinerary, service_period,
-                        shape_id, estaciones, horarios):
-    # debug
-    print("DEBUG Adding trips for itinerary", itinerary.name)
-
-    for viaje in horarios:
-        indice = 0
-        trip = gtfs_route.AddTrip(schedule, headsign=itinerary.name,
-                                  service_period=service_period)
-        while indice < len(estaciones):
-            tiempo = viaje[indice]
-            estacion = estaciones[indice]
-            if tiempo != "-":
-                tiempo_parada = datetime.strptime(tiempo, "%H:%M")
-                tiempo_parada = str(tiempo_parada.time())
-
-                for stop in itinerary.stops:
-                    if stop.name == estacion:
-                        parada = schedule.GetStop(str(stop.id))
-                        trip.AddStopTime(parada, stop_time=str(tiempo_parada))
-                        continue
-
-            # add empty attributes to make navitia happy
-            trip.block_id = ""
-            trip.wheelchair_accessible = ""
-            trip.bikes_allowed = ""
-            trip.shape_id = shape_id
-            trip.direction_id = ""
-
-            indice = indice + 1
-    return
-
-
-def load_stations(route, operation, filename='data/input_Medellin.json'):
-    input_file = open(filename)
-    input_data = json.load(input_file)
-
-    stations = []
-    for direction in input_data["itinerario"][route.ref]:
-        fr = direction["from"].encode('utf-8')
-        to = direction["to"].encode('utf-8')
-        data_operation = direction["operacion"].encode('utf-8')
-        if (fr == route.fr.encode('utf-8') and
-           to == route.to.encode('utf-8') and data_operation == operation):
-            for station in direction["estaciones"]:
-                stations = stations + [station.encode('utf-8')]
-
-    # debug
-    # print("(json) estaciones encontradas: " + str(len(stations)))
-    # for estacion in stations:
-    #    print(estacion)
-
-    return stations
-
-
-def load_times(route, operation, filename='data/input_Medellin.json'):
-    input_file = open(filename)
-    input_data = json.load(input_file)
-
-    # route_directions = input_data["itinerario"][route.ref]["horarios"]
-    times = None
-    for direction in input_data["itinerario"][route.ref]:
-
-        fr = direction["from"].encode('utf-8')
-        to = direction["to"].encode('utf-8')
-        data_operation = direction["operacion"].encode('utf-8')
-        if (fr == route.fr.encode('utf-8') and
-           to == route.to.encode('utf-8') and data_operation == operation):
-            times = direction["horarios"]
-
-    if times is None:
-        print("debug: ruta va de", route.fr.encode('utf-8'),
-              "hacia", route.to.encode('utf-8'))
-        print("error consiguiendo los tiempos de la ruta")
-
-    return times
